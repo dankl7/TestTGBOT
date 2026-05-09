@@ -1,0 +1,14 @@
+aiogram>=3.3.0
+httpx>=0.25.0
+SQLAlchemy>=2.0.25
+asyncpg>=0.29.0
+redis>=5.0.1
+celery>=5.3.6
+pydantic>=2.5.3
+pydantic-settings>=2.1.0
+alembic>=1.13.1
+pytest>=7.4.4
+pytest-asyncio>=0.23.5
+python-dotenv>=1.0.0
+thefuzz>=0.20.0
+aiohttp_socks>=0.8.0
