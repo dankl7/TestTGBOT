@@ -22,6 +22,7 @@ def is_admin(user_id: int) -> bool:
 
 
 @router.message(Command("catalog"))
+@router.message(F.text == "🗂 Каталог")
 async def cmd_catalog(message: Message):
     """
     Обработчик команды /catalog и кнопки '🗂 Каталог'.

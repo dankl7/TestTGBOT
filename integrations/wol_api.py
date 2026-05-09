@@ -8,37 +8,52 @@ logger = logging.getLogger(__name__)
 
 
 class WolApiClient:
+    """
+    Async-клиент Window of Light API.
+
+    Использует shared httpx.AsyncClient для переиспользования TCP-соединений
+    между запросами. Клиент создаётся лениво при первом обращении и должен
+    быть закрыт через aclose() при остановке приложения.
+    """
+
     def __init__(self):
-        self.base_url = settings.wol_api_base_url
+        self.base_url = settings.wol_api_base_url.rstrip("/")
         self.timeout = settings.wol_api_timeout_seconds
+        self._client: Optional[httpx.AsyncClient] = None
+
+    @property
+    def client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout)
+        return self._client
+
+    async def aclose(self) -> None:
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
 
     async def _request(self, method: str, endpoint: str, **kwargs) -> Optional[Any]:
-        url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
-
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            try:
-                response = await client.request(method, url, **kwargs)
-                response.raise_for_status()
-                return response.json()
-            except httpx.HTTPStatusError as e:
-                logger.error(f"HTTPStatusError {e.response.status_code} for {url}: {e.response.text}")
-            except httpx.RequestError as e:
-                logger.error(f"RequestError while requesting {url}: {str(e)}")
-            except Exception as e:
-                logger.error(f"Unexpected error while requesting {url}: {str(e)}")
+        path = "/" + endpoint.lstrip("/")
+        try:
+            response = await self.client.request(method, path, **kwargs)
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTPStatusError {e.response.status_code} for {path}: {e.response.text}")
+        except httpx.RequestError as e:
+            logger.error(f"RequestError while requesting {path}: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error while requesting {path}: {str(e)}")
 
         return None
 
     async def check_health(self) -> bool:
         """Check API availability."""
-        url = f"{self.base_url.rstrip('/')}/health"
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            try:
-                response = await client.get(url)
-                return response.status_code == 200
-            except Exception as e:
-                logger.error(f"Health check failed: {str(e)}")
-                return False
+        try:
+            response = await self.client.get("/health")
+            return response.status_code == 200
+        except Exception as e:
+            logger.error(f"Health check failed: {str(e)}")
+            return False
 
     async def get_status(self) -> Optional[Dict]:
         return await self._request("GET", "/status")

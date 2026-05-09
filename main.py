@@ -9,6 +9,7 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
 
 from config import settings
+from integrations.wol_api import wol_api_client
 
 # Настройка логирования
 logging.basicConfig(
@@ -72,6 +73,7 @@ async def main():
         logger.info("Остановка бота, закрытие сессий...")
         await dp.storage.close()
         await bot.session.close()
+        await wol_api_client.aclose()
 
 if __name__ == "__main__":
     try:
