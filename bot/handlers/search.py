@@ -32,11 +32,22 @@ CHANNEL_NAMES: dict = {
     '1963407298': 'Best Resale',
 }
 
+# Короткие лейблы каналов для шапки таблицы
+CHANNEL_SHORT: dict = {
+    '1963407298': 'Best',
+    '-1001963407298': 'Top',
+}
+
 # Приоритет отображения каналов (меньше = левее в таблице)
 CHANNEL_PRIORITY: dict = {
     '1963407298': 0,        # Best Resale — первый
     '-1001963407298': 1,    # Top Resale — второй
 }
+
+# Сколько символов отводим под колонку с ценой в монопространственной таблице
+PRICE_COL_WIDTH = 8
+# Сколько символов отводим под колонку с цветом
+COLOR_COL_WIDTH = 18
 
 
 
@@ -256,17 +267,12 @@ async def _show_product_card(callback: CallbackQuery, product_id: str):
         await callback.answer("Ошибка при отображении товара", show_alert=True)
 
 
-async def _build_model_text(brand: str, model: str, products: list) -> tuple:
-    if not products:
-        return "", {}
-
-    short = _get_short_model(model)
-    cat = products[0].get("category_id") or ""
-    cat_emoji = {
-        "smartphones": "📱", "laptops": "💻", "tablets": "📲",
-        "consoles": "🎮", "accessories": "🎧",
-    }.get(cat, "📦")
-
+def _index_variants(products: list) -> tuple:
+    """
+    Группирует товары по (storage, sim, flag, color, ram).
+    Возвращает (variant_order, variants, channels_seen).
+    variants[vkey][ch] = (price, product_id) — самая дешёвая цена по каналу.
+    """
     def _sort_key(p: dict) -> tuple:
         attrs = p.get("attributes") or {}
         return (
@@ -280,9 +286,8 @@ async def _build_model_text(brand: str, model: str, products: list) -> tuple:
     sorted_products = sorted(products, key=_sort_key)
 
     channels_seen: list = []
-    variant_data: dict = {}
+    variants: dict = {}
     variant_order: list = []
-    variant_channel_products: dict = {}
 
     for p in sorted_products:
         attrs = p.get("attributes") or {}
@@ -298,19 +303,172 @@ async def _build_model_text(brand: str, model: str, products: list) -> tuple:
         )
         price = p.get("price")
         pid = str(p.get("id") or "")
-        if vkey not in variant_data:
+        if vkey not in variants:
             variant_order.append(vkey)
-            variant_data[vkey] = {}
-            variant_channel_products[vkey] = {}
-        if price is not None:
-            existing = variant_data[vkey].get(ch)
-            if existing is None or float(price) < existing:
-                variant_data[vkey][ch] = float(price)
-                if pid:
-                    variant_channel_products[vkey][ch] = pid
+            variants[vkey] = {}
+        existing = variants[vkey].get(ch)
+        new_price = float(price) if price is not None else None
+        if new_price is not None and (existing is None or existing[0] is None or new_price < existing[0]):
+            variants[vkey][ch] = (new_price, pid or (existing[1] if existing else ""))
+        elif existing is None and pid:
+            variants[vkey][ch] = (None, pid)
+
+    return variant_order, variants, channels_seen
+
+
+def _format_price_cell(price_val, width: int = PRICE_COL_WIDTH) -> str:
+    """Цена внутри монопространственной колонки. Правое выравнивание."""
+    return _format_price_short(price_val).rjust(width)
+
+
+def _build_table_text(
+    cat_emoji: str,
+    model: str,
+    variant_order: list,
+    variants: dict,
+    ch_best: str,
+    ch_top: Optional[str],
+) -> str:
+    """
+    Сборка читаемой таблицы:
+      • Storage — заголовок
+      • SIM-type — подзаголовок (между разными SIM — пустая строка)
+      • Цвета и цены выровнены в монопространственной колонке
+      • Над ценами — лейблы каналов (Best | Top)
+    """
+    title = f"{cat_emoji} <b>{escape_html(model)}</b>"
+
+    best_label = CHANNEL_SHORT.get(ch_best, ch_best[:4])
+    top_label = CHANNEL_SHORT.get(ch_top, (ch_top or "")[:4]) if ch_top else ""
+    has_two = bool(ch_top)
+
+    if has_two:
+        col_header = (
+            " " * COLOR_COL_WIDTH
+            + best_label.rjust(PRICE_COL_WIDTH)
+            + " │ "
+            + top_label.rjust(PRICE_COL_WIDTH)
+        )
+    else:
+        col_header = " " * COLOR_COL_WIDTH + best_label.rjust(PRICE_COL_WIDTH)
+
+    blocks: list = []
+    by_storage: dict = {}
+    storage_order: list = []
+    for vkey in variant_order:
+        storage = vkey[0]
+        if storage not in by_storage:
+            by_storage[storage] = []
+            storage_order.append(storage)
+        by_storage[storage].append(vkey)
+
+    for storage in storage_order:
+        section_lines = [f"📦 <b>{escape_html(storage or '—')}</b>", col_header]
+        prev_sim_flag: Optional[tuple] = None
+        for vkey in by_storage[storage]:
+            _, sim, flag, color, _ = vkey
+            sim_flag_key = (sim, flag)
+            if prev_sim_flag is not None and sim_flag_key != prev_sim_flag:
+                section_lines.append("")
+            if sim_flag_key != prev_sim_flag:
+                head_parts = []
+                if flag:
+                    head_parts.append(flag)
+                if sim:
+                    head_parts.append(escape_html(sim))
+                section_lines.append(" ".join(head_parts) if head_parts else "—")
+                prev_sim_flag = sim_flag_key
+
+            d = variants[vkey]
+            p_best_entry = d.get(ch_best)
+            p_top_entry = d.get(ch_top) if ch_top else None
+            p_best = p_best_entry[0] if p_best_entry else None
+            p_top = p_top_entry[0] if p_top_entry else None
+
+            color_cell = (color or "—").ljust(COLOR_COL_WIDTH)[:COLOR_COL_WIDTH]
+            if has_two:
+                price_cell = (
+                    _format_price_cell(p_best)
+                    + " │ "
+                    + _format_price_cell(p_top)
+                )
+            else:
+                price_cell = _format_price_cell(p_best)
+            section_lines.append(escape_html(color_cell) + price_cell)
+
+        blocks.append("<pre>" + "\n".join(section_lines) + "</pre>")
+
+    return title + "\n\n" + "\n".join(blocks)
+
+
+async def _build_variant_buttons(
+    variant_order: list,
+    variants: dict,
+    ch_best: str,
+    ch_top: Optional[str],
+) -> tuple:
+    """
+    Строит ряды inline-кнопок по вариантам (по одной кнопке на цену канала).
+    Каждая кнопка ведёт в карточку товара (callback `pv:`).
+    Возвращает (button_rows, pid_map).
+    """
+    button_rows: list = []
+    pid_map: dict = {}
+
+    for vkey in variant_order:
+        storage, sim, flag, color, _ = vkey
+        d = variants[vkey]
+        row: list = []
+
+        for ch, ch_label in (
+            (ch_best, CHANNEL_SHORT.get(ch_best, "B")),
+            (ch_top, CHANNEL_SHORT.get(ch_top, "T") if ch_top else None),
+        ):
+            if ch is None:
+                continue
+            entry = d.get(ch)
+            if entry is None:
+                continue
+            price, pid = entry
+            if not pid or price is None:
+                continue
+            short_id = await redis_store.generate_short_id(pid)
+            pid_map[short_id] = pid
+            label_parts = []
+            if flag:
+                label_parts.append(flag)
+            if storage:
+                label_parts.append(storage)
+            if color:
+                label_parts.append(color)
+            variant_label = " ".join(label_parts) or "—"
+            price_str = _format_price_short(price) if price is not None else "—"
+            btn_text = f"{ch_label}: {variant_label} · {price_str}"
+            row.append(
+                InlineKeyboardButton(text=btn_text, callback_data=f"pv:{short_id}")
+            )
+
+        if row:
+            # Показываем по 1 кнопке в ряд для длинных лейблов на мобильном экране
+            for btn in row:
+                button_rows.append([btn])
+
+    return button_rows, pid_map
+
+
+async def _build_model_text(brand: str, model: str, products: list) -> tuple:
+    if not products:
+        return "", {}
+
+    cat = products[0].get("category_id") or ""
+    cat_emoji = {
+        "smartphones": "📱", "laptops": "💻", "tablets": "📲",
+        "consoles": "🎮", "accessories": "🎧",
+    }.get(cat, "📦")
+
+    variant_order, variants, channels_seen = _index_variants(products)
 
     channels_seen.sort(key=lambda ch: CHANNEL_PRIORITY.get(ch, 99))
-
     if len(channels_seen) < 2:
         for ch_id in CHANNEL_PRIORITY:
             if ch_id not in channels_seen:
@@ -318,57 +476,61 @@ async def _build_model_text(brand: str, model: str, products: list) -> tuple:
         channels_seen.sort(key=lambda ch: CHANNEL_PRIORITY.get(ch, 99))
 
     ch_best = channels_seen[0]
-    ch_top = channels_seen[1]
+    ch_top = channels_seen[1] if len(channels_seen) > 1 else None
     has_two_channels = len([ch for ch in channels_seen if ch != "?"]) >= 2
+    if not has_two_channels:
+        ch_top = None
 
-    header = f"{cat_emoji} <b>{escape_html(model)}:</b>\n"
-    lines = []
-    product_id_map = {}
+    text = _build_table_text(cat_emoji, model, variant_order, variants, ch_best, ch_top)
 
-    prev_storage = None
-
+    pid_map: dict = {}
     for vkey in variant_order:
-        storage, sim, flag, color, ram = vkey
+        for ch in (ch_best, ch_top):
+            if ch is None:
+                continue
+            entry = variants[vkey].get(ch)
+            if entry and entry[1]:
+                short_id = await redis_store.generate_short_id(entry[1])
+                pid_map[short_id] = entry[1]
 
-        if prev_storage is not None and storage != prev_storage:
-            lines.append("")
-        prev_storage = storage
+    return text, pid_map
 
-        parts = []
-        if flag:
-            parts.append(flag)
-        if sim:
-            parts.append(sim)
-        if storage:
-            parts.append(storage)
-        if color:
-            parts.append(color)
 
-        label = " ".join(parts)
+async def _build_model_blocks(brand: str, model: str, products: list) -> tuple:
+    """
+    Полная сборка модельной карточки: текст + кнопки-варианты.
+    Используется в режиме одиночной модели (build_model_response), где есть место
+    под inline-кнопки на каждый прайс.
+    Возвращает (text, button_rows, pid_map).
+    """
+    if not products:
+        return "", [], {}
 
-        d = variant_data[vkey]
-        p_best = _format_price_short(d.get(ch_best))
-        p_top = _format_price_short(d.get(ch_top))
+    cat = products[0].get("category_id") or ""
+    cat_emoji = {
+        "smartphones": "📱", "laptops": "💻", "tablets": "📲",
+        "consoles": "🎮", "accessories": "🎧",
+    }.get(cat, "📦")
 
-        best_pid = variant_channel_products.get(vkey, {}).get(ch_best)
-        top_pid = variant_channel_products.get(vkey, {}).get(ch_top)
+    variant_order, variants, channels_seen = _index_variants(products)
 
-        if best_pid:
-            best_short = await redis_store.generate_short_id(best_pid)
-            product_id_map[best_short] = best_pid
-        if top_pid:
-            top_short = await redis_store.generate_short_id(top_pid)
-            product_id_map[top_short] = top_pid
+    channels_seen.sort(key=lambda ch: CHANNEL_PRIORITY.get(ch, 99))
+    if len(channels_seen) < 2:
+        for ch_id in CHANNEL_PRIORITY:
+            if ch_id not in channels_seen:
+                channels_seen.append(ch_id)
+        channels_seen.sort(key=lambda ch: CHANNEL_PRIORITY.get(ch, 99))
 
-        if has_two_channels:
-            line = f"{escape_html(label)} — {p_best} | {p_top}"
-        else:
-            line = f"{escape_html(label)} — {p_best}"
+    ch_best = channels_seen[0]
+    ch_top = channels_seen[1] if len(channels_seen) > 1 else None
+    has_two_channels = len([ch for ch in channels_seen if ch != "?"]) >= 2
+    if not has_two_channels:
+        ch_top = None
 
-        lines.append(line)
+    text = _build_table_text(cat_emoji, model, variant_order, variants, ch_best, ch_top)
+    button_rows, pid_map = await _build_variant_buttons(variant_order, variants, ch_best, ch_top)
 
-    text = header + "\n".join(lines)
-    return text, product_id_map
+    return text, button_rows, pid_map
 
 
 
@@ -387,7 +549,7 @@ async def build_model_response(
         token = await redis_store.save_query_token(
             {"brand": brand, "model": model, "mode": "model"}
         )
-    model_text, pid_map = await _build_model_text(brand, model, products)
+    model_text, button_rows, pid_map = await _build_model_blocks(brand, model, products)
     if token and pid_map:
         await redis_store.redis.set(
             f"pv_map:{token}",
@@ -395,6 +557,8 @@ async def build_model_response(
             ex=1800
         )
     builder = InlineKeyboardBuilder()
+    for row in button_rows:
+        builder.row(*row)
     builder.row(InlineKeyboardButton(text="← Каталог", callback_data="back_to_panel"))
     return model_text, builder.as_markup(), token
 
@@ -740,12 +904,14 @@ async def handle_price_table_callback(callback: CallbackQuery):
             await callback.answer("Нет данных.", show_alert=True)
             return
         products = raw.get("products", [])
-        model_text, pid_map = await _build_model_text(brand, model, products)
+        model_text, button_rows, pid_map = await _build_model_blocks(brand, model, products)
         if pid_map:
             await redis_store.redis.set(
                 f"pv_map:{token}", json.dumps(pid_map), ex=1800
             )
         builder = InlineKeyboardBuilder()
+        for row in button_rows:
+            builder.row(*row)
         builder.row(InlineKeyboardButton(text="← Каталог", callback_data="back_to_panel"))
         await callback.message.edit_text(model_text, reply_markup=builder.as_markup())
         await callback.answer()

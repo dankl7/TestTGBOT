@@ -87,7 +87,7 @@ class CatalogRepository:
             FROM products
             WHERE brand IS NOT NULL
               AND model IS NOT NULL
-              AND model != 
+              AND model != ''
             GROUP BY brand, model, category_id
             HAVING COUNT(*) >= :min_count
             ORDER BY brand, cnt DESC
