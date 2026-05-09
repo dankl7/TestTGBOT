@@ -91,5 +91,19 @@ class HistoryRepository:
         await session.commit()
         return result.rowcount > 0
 
+    async def delete_all_for_user(
+        self,
+        session: AsyncSession,
+        user_id: int,
+    ) -> int:
+        """
+        Удаляет всю историю поиска пользователя.
+        Возвращает количество удалённых записей.
+        """
+        stmt = delete(UserSearchHistory).where(UserSearchHistory.user_id == user_id)
+        result = await session.execute(stmt)
+        await session.commit()
+        return result.rowcount or 0
+
 
 history_repository = HistoryRepository()
