@@ -31,3 +31,24 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# Celery
+celerybeat-schedule
+celerybeat-schedule.*
+celerybeat.pid
+
+# Build artefacts / archives
+*.tgz
+*.tar.gz
+*.zip
+
+# IDE
+.idea/
+.vscode/
+
+# Tests / coverage
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/

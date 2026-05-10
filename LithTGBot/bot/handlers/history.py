@@ -1,97 +1,145 @@
-import logging
 import asyncio
-from datetime import datetime
+import logging
 
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from database.session import async_session_maker
 from database.repositories.history import history_repository
+from database.session import async_session_maker
 from integrations.wol_api import wol_api_client
+from services.cleanup import cleanup_service
 from utils.price_formatter import format_price
 from utils.text import escape_html
-from services.cleanup import cleanup_service
 
 logger = logging.getLogger(__name__)
 router = Router()
 
+# Сколько последних записей показываем как отдельные карточки
+HISTORY_RENDER_LIMIT = 10
 
-async def _show_history(message: Message, user_id: int, edit: bool = False):
-    """
-    Получает историю запросов пользователя, актуализирует цены
-    и выводит в виде списка с кнопками.
-    """
+
+def _record_keyboard(record_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура отдельной записи истории: повторить + удалить."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="🔄 Повторить", callback_data=f"r:{record_id}"),
+        InlineKeyboardButton(text="❌ Удалить", callback_data=f"hd:{record_id}"),
+    )
+    return builder.as_markup()
+
+
+def _footer_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура итогового сообщения: очистить всю историю."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="🧹 Очистить всю историю",
+            callback_data="hda:confirm",
+        )
+    )
+    return builder.as_markup()
+
+
+def _confirm_clear_keyboard() -> InlineKeyboardMarkup:
+    """Подтверждение полной очистки истории."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="✅ Да, очистить", callback_data="hda:yes"),
+        InlineKeyboardButton(text="✖️ Отмена", callback_data="hda:no"),
+    )
+    return builder.as_markup()
+
+
+def _format_record_block(record, product) -> str:
+    """Форматирует одну запись истории в виде компактного блока."""
+    query_text = record.normalized_query or record.query
+    date_str = record.created_at.strftime("%d.%m.%Y %H:%M")
+
+    if record.product_id:
+        if isinstance(product, dict) and "price" in product:
+            price_str = f"{format_price(product['price'])} (актуальная)"
+        else:
+            price_str = "товар недоступен"
+    elif record.final_price:
+        price_str = f"{format_price(record.final_price)} (на момент поиска)"
+    else:
+        price_str = f"найдено: {record.results_count}"
+
+    text = (
+        f"🔍 <b>{escape_html(query_text)}</b>\n"
+        f"<i>{escape_html(price_str)}</i> · <code>{date_str}</code>"
+    )
+    return text
+
+
+async def _show_history(message: Message, user_id: int):
+    """Отправляет историю как отдельные карточки + итоговую кнопку очистки."""
     async with async_session_maker() as session:
-        records = list(await history_repository.get_user_history(session, user_id, limit=20))
+        records = list(
+            await history_repository.get_user_history(
+                session, user_id, limit=HISTORY_RENDER_LIMIT
+            )
+        )
 
     if not records:
-        text = "Ваша история поиска пуста."
-        try:
-            if edit:
-                await message.edit_text(text, reply_markup=None)
-            else:
-                await message.answer(text)
-        except Exception:
-            pass
+        await message.answer("Ваша история поиска пуста.")
         return
 
-    text = "📜 <b>История поиска</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    builder = InlineKeyboardBuilder()
+    header_text = (
+        f"📜 <b>История поиска</b>\n"
+        f"<i>{len(records)} последн{_plural_records(len(records))}</i>"
+    )
+    await message.answer(header_text)
 
-    # Собираем запросы к API для актуализации цен параллельно
-    tasks = []
-    for r in records:
-        if r.product_id:
-            tasks.append(wol_api_client.get_product(str(r.product_id)))
-        else:
-            # Пустая корутина для сохранения порядка, если это просто поиск без товара
-            async def dummy(): return None
-            tasks.append(dummy())
+    # Параллельно тянем актуальные цены по тем записям, у которых есть product_id
+    async def _fetch_product(rec):
+        if rec.product_id:
+            try:
+                return await wol_api_client.get_product(str(rec.product_id))
+            except Exception as e:
+                logger.error(f"history: get_product failed for {rec.product_id}: {e}")
+                return None
+        return None
 
-    products = await asyncio.gather(*tasks, return_exceptions=True)
+    products = await asyncio.gather(
+        *[_fetch_product(r) for r in records], return_exceptions=False
+    )
 
-    for i, (record, product) in enumerate(zip(records, products), start=1):
-        query_text = record.normalized_query or record.query
-        date_str = record.created_at.strftime("%d.%m.%Y")
+    for record, product in zip(records, products):
+        try:
+            await message.answer(
+                _format_record_block(record, product),
+                reply_markup=_record_keyboard(record.id),
+            )
+        except Exception as e:
+            logger.error(f"history: failed to send record {record.id}: {e}")
 
-        if record.product_id:
-            if isinstance(product, dict) and "price" in product:
-                price_str = f"{format_price(product['price'])} (акт.)"
-            else:
-                price_str = "товар недоступен"
-        else:
-            if record.final_price:
-                price_str = f"{format_price(record.final_price)} (сохр.)"
-            else:
-                price_str = f"Найдено: {record.results_count}"
+    await message.answer(
+        "🧹 <i>Очистить всю историю поиска?</i>",
+        reply_markup=_footer_keyboard(),
+    )
 
-        text += f"<b>{i}.</b> {escape_html(query_text)}\n"
-        text += f"   {escape_html(price_str)} • {date_str}\n\n"
 
-        builder.button(text=f"🔄 Повт. {i}", callback_data=f"r:{record.id}")
-        builder.button(text=f"❌ Удал. {i}", callback_data=f"hd:{record.id}")
-
-    # Размещаем по 2 кнопки в ряд: [Повторить N] [Удалить N]
-    builder.adjust(2)
-
-    try:
-        if edit:
-            if message.text != text and message.html_text != text:
-                await message.edit_text(text, reply_markup=builder.as_markup())
-        else:
-            await message.answer(text, reply_markup=builder.as_markup())
-    except Exception as e:
-        logger.error(f"Error showing history for user {user_id}: {e}")
+def _plural_records(n: int) -> str:
+    """Возвращает суффикс для слова "последн<суффикс>" в зависимости от числа."""
+    if n % 10 == 1 and n % 100 != 11:
+        return "ий запрос"
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return "их запроса"
+    return "их запросов"
 
 
 @router.message(Command("history"))
 @router.message(F.text == "📜 История")
 async def cmd_history(message: Message):
-    """
-    Обработчик команды /history и кнопки '📜 История'.
-    """
+    """Обработчик команды /history и кнопки '📜 История'."""
     try:
         await message.delete()
     except Exception:
@@ -101,9 +149,7 @@ async def cmd_history(message: Message):
 
 @router.callback_query(F.data.startswith("hd:"))
 async def process_delete_history(callback: CallbackQuery):
-    """
-    Обрабатывает удаление записи из истории.
-    """
+    """Удаление одной записи истории — удаляет соответствующее сообщение."""
     parts = callback.data.split(":")
     if len(parts) < 2:
         await callback.answer("Ошибка: неверный ID записи.", show_alert=True)
@@ -117,23 +163,75 @@ async def process_delete_history(callback: CallbackQuery):
 
     try:
         async with async_session_maker() as session:
-            success = await history_repository.delete_record(session, history_id, callback.from_user.id)
+            success = await history_repository.delete_record(
+                session, history_id, callback.from_user.id
+            )
 
-        if success:
-            await callback.answer("✅ Запись удалена.")
-            await _show_history(callback.message, callback.from_user.id, edit=True)
-        else:
-            await callback.answer("Ошибка при удалении или запись уже удалена.", show_alert=True)
+        if not success:
+            await callback.answer(
+                "Запись не найдена или уже удалена.", show_alert=True
+            )
+            return
+
+        await callback.answer("✅ Запись удалена")
+        try:
+            await callback.message.delete()
+        except Exception:
+            await callback.message.edit_text(
+                "<i>Запись удалена.</i>", reply_markup=None
+            )
     except Exception as e:
-        logger.error(f"Error deleting history {history_id} for user {callback.from_user.id}: {e}")
+        logger.error(
+            f"Error deleting history {history_id} for user "
+            f"{callback.from_user.id}: {e}"
+        )
         await callback.answer("Произошла ошибка.", show_alert=True)
+
+
+@router.callback_query(F.data == "hda:confirm")
+async def process_clear_all_confirm(callback: CallbackQuery):
+    """Запрос подтверждения полной очистки истории."""
+    await callback.message.edit_text(
+        "❓ <b>Очистить всю историю поиска?</b>\n"
+        "<i>Это действие нельзя отменить.</i>",
+        reply_markup=_confirm_clear_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "hda:no")
+async def process_clear_all_cancel(callback: CallbackQuery):
+    """Отмена полной очистки истории."""
+    await callback.message.edit_text(
+        "🧹 <i>Очистить всю историю поиска?</i>",
+        reply_markup=_footer_keyboard(),
+    )
+    await callback.answer("Отменено")
+
+
+@router.callback_query(F.data == "hda:yes")
+async def process_clear_all_history(callback: CallbackQuery):
+    """Полная очистка истории поиска пользователя."""
+    try:
+        async with async_session_maker() as session:
+            deleted = await history_repository.delete_all_for_user(
+                session, callback.from_user.id
+            )
+        await callback.message.edit_text(
+            f"🧹 <b>История очищена</b>\n<i>удалено записей: {deleted}</i>",
+            reply_markup=None,
+        )
+        await callback.answer(f"Удалено: {deleted}")
+    except Exception as e:
+        logger.error(
+            f"Error clearing history for user {callback.from_user.id}: {e}"
+        )
+        await callback.answer("Не удалось очистить историю.", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("r:"))
 async def process_repeat_search(callback: CallbackQuery):
-    """
-    Обрабатывает повтор поискового запроса из истории.
-    """
+    """Повтор поискового запроса из истории."""
     parts = callback.data.split(":")
     if len(parts) < 2:
         await callback.answer("Ошибка: неверный ID записи.", show_alert=True)
@@ -156,15 +254,20 @@ async def process_repeat_search(callback: CallbackQuery):
         query = record.query
         await callback.answer("🔄 Повторяю поиск...")
 
-        # Отложенный импорт для предотвращения циклических зависимостей
         from bot.handlers.search import build_search_response
 
-        text, markup, token = await build_search_response(query, callback.from_user.id, 0)
+        text, markup, _ = await build_search_response(
+            query, callback.from_user.id, 0
+        )
         sent_msg = await callback.message.answer(text, reply_markup=markup)
 
-        # Регистрируем новое поисковое сообщение для автоочистки
-        await cleanup_service.register_message(callback.bot, callback.message.chat.id, sent_msg.message_id)
-
+        await cleanup_service.register_message(
+            callback.bot, callback.message.chat.id, sent_msg.message_id
+        )
     except Exception as e:
-        logger.error(f"Error repeating search for history {history_id}: {e}")
-        await callback.message.answer("Произошла ошибка при выполнении поиска. Попробуйте позже.")
+        logger.error(
+            f"Error repeating search for history {history_id}: {e}"
+        )
+        await callback.message.answer(
+            "Произошла ошибка при выполнении поиска. Попробуйте позже."
+        )

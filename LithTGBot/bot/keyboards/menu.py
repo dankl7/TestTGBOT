@@ -4,7 +4,7 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 def get_main_menu() -> ReplyKeyboardMarkup:
     """
     Создает и возвращает главную reply-клавиатуру меню.
-    Три кнопки: Поиск, История, Отслеживаемые.
+    Кнопки: Поиск, История, Отслеживаемые, Каталог, Помощь.
     """
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -14,6 +14,7 @@ def get_main_menu() -> ReplyKeyboardMarkup:
                 KeyboardButton(text="🔔 Отслеживаемые"),
             ],
             [
+                KeyboardButton(text="🗂 Каталог"),
                 KeyboardButton(text="ℹ️ Помощь"),
             ],
         ],
