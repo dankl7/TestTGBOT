@@ -1,7 +1,7 @@
 import logging
 from aiogram import Router, F
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from config import settings
@@ -11,9 +11,16 @@ from database.repositories.catalog import catalog_repository
 from services.redis_store import redis_store
 from utils.text import escape_html
 from utils.price_formatter import format_price
+from bot.catalog_categories import (
+    CATEGORIES,
+    CATEGORY_BY_KEY,
+    build_where_clause,
+)
 
 logger = logging.getLogger(__name__)
 router = Router()
+
+CATALOG_MSG_LIMIT = 3500  # запас под HTML-теги до Telegram-лимита 4096
 
 
 def is_admin(user_id: int) -> bool:
@@ -21,37 +28,110 @@ def is_admin(user_id: int) -> bool:
     return user_id in settings.admin_user_ids
 
 
+def _build_catalog_keyboard() -> "InlineKeyboardBuilder":
+    kb = InlineKeyboardBuilder()
+    for cat in CATEGORIES:
+        kb.button(text=cat["label"], callback_data=f"cat:{cat['key']}")
+    kb.adjust(2)
+    return kb
+
+
 @router.message(Command("catalog"))
 @router.message(F.text == "🗂 Каталог")
 async def cmd_catalog(message: Message):
-    """
-    Обработчик команды /catalog и кнопки '🗂 Каталог'.
-    Показывает доступные категории товаров из Window of Light API.
-    """
+    """Кнопка «Каталог» — выводит inline-меню категорий."""
+    kb = _build_catalog_keyboard()
+    await message.answer(
+        "🗂 <b>Каталог</b>\n\n"
+        "Выберите категорию, чтобы увидеть все товары из двух каналов:",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(F.data.startswith("cat:"))
+async def cb_catalog_category(callback: CallbackQuery):
+    """Клик по категории — выводит все товары сравнительными таблицами."""
+    await callback.answer()
+    key = (callback.data or "").split(":", 1)[1] if callback.data else ""
+    cat = CATEGORY_BY_KEY.get(key)
+    if not cat:
+        await callback.message.answer("Неизвестная категория.")
+        return
+
+    where, params = build_where_clause(cat)
     try:
-        categories = await wol_api_client.get_categories()
-        if not categories:
-            await message.answer("Каталог временно недоступен.")
-            return
-
-        text = "🗂 <b>Доступные категории:</b>\n\n"
-        for cat in categories:
-            # Пропускаем неактивные категории, если такой флаг есть и он false
-            if not cat.get("is_active", True):
-                continue
-
-            name = cat.get("name", "Без названия")
-            cat_id = cat.get("id", "")
-
-            text += f"• <b>{escape_html(name)}</b> (<code>{escape_html(cat_id)}</code>)\n"
-
-        text += "\n<i>Вы можете использовать эти названия в поиске.</i>\n"
-        text += "Также вы можете написать <code>последние товары</code> для просмотра новинок."
-
-        await message.answer(text)
+        async with async_session_maker() as session:
+            products = await catalog_repository.get_products_by_filter(
+                session, where, params, limit=2000,
+            )
     except Exception as e:
-        logger.error(f"Catalog fetch error: {e}")
-        await message.answer("Не удалось загрузить каталог.")
+        logger.error(f"Catalog query failed for {key}: {e}")
+        await callback.message.answer("Ошибка при загрузке каталога. Попробуйте позже.")
+        return
+
+    if not products:
+        await callback.message.answer(
+            f"В категории <b>{escape_html(cat['label'])}</b> пока нет товаров."
+        )
+        return
+
+    from bot.handlers.search import (
+        _index_variants,
+        _build_table_text,
+        CHANNEL_PRIORITY,
+        canonical_channel,
+    )
+
+    # Канонизируем source_channel: в БД одна и та же группа Telegram-канала
+    # хранится в двух формах ("1887497207" и "-1001887497207"). Сводим к одной,
+    # иначе сравнительная таблица показывала бы две колонки одного и того же канала.
+    for p in products:
+        p["source_channel"] = canonical_channel(p.get("source_channel"))
+
+    # Группируем по (brand, model), в том же порядке что и SQL ORDER BY.
+    groups: dict = {}
+    order: list = []
+    for p in products:
+        key2 = (p.get("brand") or "", p.get("model") or "")
+        if key2 not in groups:
+            groups[key2] = []
+            order.append(key2)
+        groups[key2].append(p)
+
+    header = f"🗂 <b>{escape_html(cat['label'])}</b>  —  {len(products)} тов.\n\n"
+    chunks: list = [header]
+
+    for (brand, model) in order:
+        items = groups[(brand, model)]
+        variant_order, variants, channels_seen = _index_variants(items)
+        # Сортируем каналы по приоритету, но НЕ добавляем фиктивные: показываем только реальные.
+        channels_seen.sort(key=lambda ch: CHANNEL_PRIORITY.get(ch, 99))
+        ch_best = channels_seen[0] if channels_seen else "?"
+        ch_top = channels_seen[1] if len(channels_seen) >= 2 else None
+
+        cat_emoji = {
+            "smartphones": "📱", "laptops": "💻", "tablets": "📲",
+            "consoles": "🎮", "accessories": "🎧",
+        }.get(items[0].get("category_id") or "", "📦")
+
+        block = _build_table_text(cat_emoji, model, variant_order, variants, ch_best, ch_top)
+
+        # Если блок сам по себе больше лимита — отправляем отдельным сообщением.
+        if len(block) > CATALOG_MSG_LIMIT:
+            if chunks[-1].strip():
+                chunks.append("")
+            chunks.append(block)
+            chunks.append("")
+            continue
+        # Иначе — прилепляем к текущему chunk, открывая новый при переполнении.
+        if len(chunks[-1]) + len(block) + 2 > CATALOG_MSG_LIMIT:
+            chunks.append("")
+        chunks[-1] = chunks[-1] + (block if not chunks[-1] else "\n\n" + block)
+
+    for chunk in chunks:
+        if not chunk.strip():
+            continue
+        await callback.message.answer(chunk)
 
 
 @router.message(F.text.lower() == "последние товары")

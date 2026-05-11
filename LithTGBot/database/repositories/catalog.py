@@ -71,6 +71,44 @@ class CatalogRepository:
 
         return rows
 
+    async def get_products_by_filter(
+        self,
+        session: AsyncSession,
+        where_clause: str,
+        params: Dict[str, Any],
+        limit: int = 2000,
+    ) -> List[Dict[str, Any]]:
+        """
+        Возвращает товары для каталога по произвольному параметризованному
+        WHERE (см. bot.catalog_categories.build_where_clause). SQL фикс,
+        параметры всегда через :name. Поля: id, brand, model, category_id,
+        price, source_channel, message_link, attributes.
+        """
+        stmt = text(
+            f"""
+            SELECT id, brand, model, category_id, price, source_channel,
+                   message_link, attributes
+            FROM products
+            WHERE {where_clause}
+            ORDER BY brand, model, price
+            LIMIT :limit
+            """
+        )
+        result = await session.execute(stmt, {**params, "limit": limit})
+        rows: List[Dict[str, Any]] = []
+        for row in result.fetchall():
+            rows.append({
+                "id": str(row[0]),
+                "brand": row[1],
+                "model": row[2],
+                "category_id": row[3],
+                "price": float(row[4]) if row[4] is not None else None,
+                "source_channel": row[5],
+                "message_link": row[6],
+                "attributes": row[7] or {},
+            })
+        return rows
+
     async def get_distinct_models(
         self,
         session: AsyncSession,
