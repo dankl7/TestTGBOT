@@ -14,6 +14,19 @@ class Settings(BaseSettings):
     telegram_proxy_pass: str | None = None
     telegram_proxy_type: str | None = None
 
+    @field_validator(
+        "telegram_proxy_host",
+        "telegram_proxy_port",
+        "telegram_proxy_user",
+        "telegram_proxy_pass",
+        "telegram_proxy_type",
+        mode="before",
+    )
+    def _empty_string_as_none(cls, v):
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+
     @property
     def telegram_proxy_url(self) -> str | None:
         if self.telegram_proxy_host and self.telegram_proxy_port:
