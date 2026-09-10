@@ -1,0 +1,108 @@
+category:
+  id: "smartphones"
+  name: "Smartphones"
+  parent_id: null
+  keywords:
+    # iPhone keywords
+    - "iphone"
+    - "iphone 17"
+    - "iphone 16"
+    - "iphone 15"
+    - "iphone 14"
+    - "iphone 13"
+    - "17e"
+    - "17 air"
+    - "17 pro"
+    - "17 pro max"
+    - "16e"
+    - "16 pro"
+    - "16 pro max"
+    - "15 pro"
+    - "15 pro max"
+    - "14 pro"
+    - "14 pro max"
+    - "13 pro"
+    # Samsung keywords  
+    - "samsung"
+    - "galaxy"
+    - "s26"
+    - "s25"
+    - "s24"
+    - "s26+"
+    - "s25+"
+    - "s24+"
+    - "s26 ultra"
+    - "s25 ultra"
+    - "s24 ultra"
+    - "z flip"
+    - "z fold"
+    - "a56"
+    - "a36"
+    - "a26"
+    - "a17"
+    - "a07"
+    - "smartphone"
+  
+  # Флаги стран - расширенные правила
+  flags_esim_only: ["🇧🇭", "🇨🇦", "🇬🇺", "🇯🇵", "🇰🇼", "🇲🇽", "🇴🇲", "🇶🇦", "🇸🇦", "🇦🇪", "🇺🇸", "🇻🇮"]
+  flags_esim_physical: ["🇪🇺", "🇮🇳", "🇻🇳", "🇦🇺", "🇳🇿", "🇰🇷", "🇸🇬", "🇭🇰", "🇲🇾", "🇹🇭", "🇮🇩", "🇵🇭"]
+  flags_physical_only: ["🇨🇳"]
+  
+  attributes:
+    - name: "storage"
+      patterns:
+        - "(\\d+)\\s*GB"
+        - "(\\d+)\\s*гб"
+      type: "string"
+    
+    - name: "color"
+      patterns:
+        - "\\b(black|white|blue|red|green|gold|silver|pink|purple|gray|yellow|lavender|sage|teal|ultramarine|starlight|midnight|rose|olive|graphite|natural|desert)\\b"
+      type: "string"
+    
+    - name: "region"
+      patterns:
+        - "🇧🇭|🇨🇦|🇬🇺|🇯🇵|🇰🇼|🇲🇽|🇴🇲|🇶🇦|🇸🇦|🇦🇪|🇺🇸|🇻🇮|🇪🇺|🇮🇳|🇻🇳|🇦🇺|🇳🇿|🇰🇷|🇸🇬|🇭🇰|🇨🇳|🇷🇺|🇰🇿|🇮🇩|🇹🇭|🇵🇭|🇲🇾|🇵🇦|🇨🇱|🇿🇦|🇪🇺|🇬🇧|🇮🇳|🇸🇦|🇦🇪"
+      type: "string"
+    
+    - name: "sim_type"
+      patterns:
+        - "eSIM"
+        - "2SIM"
+        - "Sim\\+eSim"
+        - "физическая"
+      type: "string"
+    
+    - name: "model_variant"
+      patterns:
+        - "(M[1-7]\\s*(Pro|Max|Ultra|Plus)?)|(S\\d{2,3}\\s*(Pro|Max|Ultra|Plus)?)|(A\\d{2,3})"
+      type: "string"
+
+  brand_patterns:
+    apple:
+      - "iphone"
+      - "ipad"
+      - "17 "
+      - "16 "
+      - "15 "
+      - "14 "
+      - "13 "
+    samsung:
+      - "samsung"
+      - "galaxy"
+      - "s26"
+      - "s25"
+      - "s24"
+      - "z flip"
+      - "z fold"
+    samsung_a:
+      - "a56"
+      - "a36"
+      - "a26"
+      - "a17"
+      - "a07"
+  
+  price_patterns:
+    - "(\\d{1,3}(?:\\s*\\d{3})*|\\d+)\\s*(₽|руб|RUB|\\$|€)"
+    - "(\\d{1,3}(?:\\s*\\d{3})*|\\d+)\\s*тыс?\\.?\\s*руб"
+    - "(\\d+)\\s*(тыс\\.?|k)\\s*(₽|руб)"

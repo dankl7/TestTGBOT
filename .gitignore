@@ -1,0 +1,34 @@
+# Secrets — never commit
+.env
+*.env
+!.env.example
+*.session
+credentials.json
+secrets.yaml
+
+# Databases / state
+*.db
+*.sqlite
+*.sqlite3
+sessions/
+celerybeat-schedule
+
+# Logs
+*.log
+*.log.*
+logs/
+
+# Archives
+*.tar.gz
+*.tgz
+*.bak
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Local convenience links
+wol_link

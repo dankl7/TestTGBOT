@@ -1,0 +1,85 @@
+category:
+  id: "laptops"
+  name: "Laptops"
+  parent_id: null
+  keywords:
+    - "macbook"
+    - "macbook air"
+    - "macbook pro"
+    - "laptop"
+    - "notebook"
+    - "ноутбук"
+    - "макбук"
+    - "m1"
+    - "m2"
+    - "m3"
+    - "m4"
+    - "m5"
+    - "neo"
+  
+  # Флаги
+  flags_esim_only: ["🇧🇭", "🇨🇦", "🇬🇺", "🇯🇵", "🇰🇼", "🇲🇽", "🇴🇲", "🇶🇦", "🇸🇦", "🇦🇪", "🇺🇸", "🇻🇮"]
+  flags_esim_physical: ["🇪🇺", "🇮🇳", "🇻🇳", "🇦🇺", "🇳🇿", "🇰🇷", "🇸🇬", "🇭🇰"]
+  flags_physical_only: ["🇨🇳"]
+  
+  attributes:
+    - name: "processor"
+      patterns:
+        - "(M[1-7]\\s*(Pro|Max|Ultra)?)"
+        - "(Core\\s*i[3579]\\s*-?\\d{4,5})"
+        - "(Ryzen\\s*[3579]\\s*\\d{4,5})"
+        - "NEO"
+      type: "string"
+    
+    - name: "ram"
+      patterns:
+        - "(\\d+)\\s*GB\\s*RAM"
+        - "(\\d+)\\s*ГБ\\s*RAM"
+        - "(\\d+)\\s*GB"
+      type: "string"
+    
+    - name: "storage"
+      patterns:
+        - "(\\d+)(GB|TB)\\s*(SSD|NVMe)?"
+        - "(\\d+)\\s*(ГБ|ТБ)"
+      type: "string"
+    
+    - name: "screen_size"
+      patterns:
+        - "(\\d{2})\\s*inch"
+        - "(\\d{2})\\s*дюйм"
+        - "13\\s*дюймов"
+        - "15\\s*дюймов"
+        - "14\\s*дюймов"
+        - "16\\s*дюймов"
+      type: "string"
+    
+    - name: "color"
+      patterns:
+        - "\\b(space gray|space black|silver|gold|midnight|starlight|sky blue|indigo|citrus)\\b"
+      type: "string"
+    
+    - name: "region"
+      patterns:
+        - "🇧🇭|🇨🇦|🇬🇺|🇯🇵|🇰🇼|🇲🇽|🇴🇲|🇶🇦|🇸🇦|🇦🇪|🇺🇸|🇻🇮|🇪🇺|🇮🇳|🇻🇳|🇦🇺|🇳🇿|🇰🇷|🇸🇬|🇭🇰|🇨🇳|🇷🇺|🇰🇿|🇮🇩|🇹🇭"
+      type: "string"
+
+  brand_patterns:
+    apple:
+      - "macbook"
+    dell:
+      - "dell"
+      - "xps"
+    hp:
+      - "hp"
+      - "spectre"
+    asus:
+      - "asus"
+      - "rog"
+    lenovo:
+      - "lenovo"
+      - "thinkpad"
+  
+  price_patterns:
+    - "(\\d{1,3}(?:\\s*\\d{3})*|\\d+)\\s*(₽|руб|RUB|\\$|€)"
+    - "(\\d+)\\s*(тыс\\.?|k)\\s*(₽|руб)"

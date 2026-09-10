@@ -1,0 +1,29 @@
+services:
+  app:
+    build: .
+    container_name: wol_app
+    restart: unless-stopped
+    user: "1000:1000"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
+    ports:
+      - "127.0.0.1:8002:8002"  # bind only on loopback
+    command: python -m services.run_combined
+    env_file:
+      - .env
+    volumes:
+      - ./sessions:/app/sessions:rw
+      - ./config:/app/config:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8002/health', timeout=3).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

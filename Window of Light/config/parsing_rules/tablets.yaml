@@ -1,0 +1,67 @@
+category:
+  id: "tablets"
+  name: "Tablets"
+  parent_id: null
+  keywords:
+    - "ipad"
+    - "ipad air"
+    - "ipad pro"
+    - "ipad mini"
+    - "tablet"
+    - "планшет"
+  
+  # Флаги
+  flags_esim_only: ["🇧🇭", "🇨🇦", "🇬🇺", "🇯🇵", "🇰🇼", "🇲🇽", "🇴🇲", "🇶🇦", "🇸🇦", "🇦🇪", "🇺🇸", "🇻🇮"]
+  flags_esim_physical: ["🇪🇺", "🇮🇳", "🇻🇳", "🇦🇺", "🇳🇿", "🇰🇷", "🇸🇬", "🇭🇰"]
+  flags_physical_only: ["🇨🇳"]
+  
+  attributes:
+    - name: "storage"
+      patterns:
+        - "(\\d+)(GB|TB)"
+        - "(\\d+)\\s*гб"
+      type: "string"
+    
+    - name: "connectivity"
+      patterns:
+        - "Wi-Fi"
+        - "LTE"
+        - "5G"
+        - "Cellular"
+      type: "string"
+    
+    - name: "color"
+      patterns:
+        - "\\b(space gray|silver|gold|rose|blue|purple|starlight|green|yellow|pink)\\b"
+      type: "string"
+    
+    - name: "processor"
+      patterns:
+        - "(M[1-7]\\s*(Pro|Max|Ultra)?)"
+        - "A[1-9][0-9]"
+      type: "string"
+    
+    - name: "screen_size"
+      patterns:
+        - "(\\d{2})\\s*inch"
+        - "(\\d{2})\\s*дюйм"
+        - "11\\s*дюймов"
+        - "13\\s*дюймов"
+      type: "string"
+    
+    - name: "region"
+      patterns:
+        - "🇧🇭|🇨🇦|🇬🇺|🇯🇵|🇰🇼|🇲🇽|🇴🇲|🇶🇦|🇸🇦|🇦🇪|🇺🇸|🇻🇮|🇪🇺|🇮🇳|🇻🇳|🇦🇺|🇳🇿|🇰🇷|🇸🇬|🇭🇰|🇨🇳|🇷🇺|🇰🇿|🇮🇩|🇹🇭"
+      type: "string"
+
+  brand_patterns:
+    apple:
+      - "ipad"
+    samsung:
+      - "galaxy tab"
+    microsoft:
+      - "surface"
+  
+  price_patterns:
+    - "(\\d{1,3}(?:\\s*\\d{3})*|\\d+)\\s*(₽|руб|RUB|\\$|€)"
+    - "(\\d+)\\s*(тыс\\.?|k)\\s*(₽|руб)"

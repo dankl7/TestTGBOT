@@ -1,146 +1,89 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import (
-    Column,
-    String,
-    Integer,
-    BigInteger,
-    Boolean,
-    Numeric,
-    DateTime,
-    ForeignKey,
-    UniqueConstraint,
-    Index,
+    Column, String, Text, BigInteger, Boolean, DateTime, ForeignKey, UUID, JSON, Integer
 )
-from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
 
 
-class Category(Base):
-    __tablename__ = "categories"
+class User(Base):
+    __tablename__ = "users"
+    telegram_id = Column(BigInteger, primary_key=True)
+    timezone = Column(Integer, default=3)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
-    id = Column(String, primary_key=True)
-    name = Column(String, nullable=False)
-    parent_id = Column(String, ForeignKey("categories.id"))
-    attributes = Column(JSONB, default=list)
-    keywords = Column(JSONB, default=list)
-    is_active = Column(Boolean, default=True)
+    projects = relationship("Project", back_populates="owner", cascade="all, delete-orphan")
+    logs = relationship("Log", back_populates="user", cascade="all, delete-orphan")
 
 
-class Channel(Base):
-    __tablename__ = "channels"
-
+class Project(Base):
+    __tablename__ = "projects"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    channel_id = Column(String, unique=True, nullable=False)
-    username = Column(String)
-    title = Column(String)
-    is_active = Column(Boolean, default=True)
-    last_message_id = Column(Integer)
+    owner_id = Column(BigInteger, ForeignKey("users.telegram_id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(500), nullable=False)
+    auth_token = Column(Text, nullable=False)
+    default_message_id = Column(UUID(as_uuid=True), ForeignKey("messages.id", ondelete="SET NULL"), nullable=True)
+    is_active = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    owner = relationship("User", back_populates="projects")
+    default_message = relationship("Message", foreign_keys=[default_message_id], post_update=True)
+    groups = relationship("Group", back_populates="project", cascade="all, delete-orphan")
+    logs = relationship("Log", back_populates="project", cascade="all, delete-orphan")
 
 
-class RawPost(Base):
-    __tablename__ = "raw_posts"
-
+class Group(Base):
+    __tablename__ = "groups"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    channel_id = Column(String, nullable=False)
-    message_id = Column(Integer, nullable=False)
-    post_id = Column(String, nullable=False, unique=True)
-    text = Column(String)
-    message_link = Column(String)
-    date = Column(DateTime(timezone=True))
-    parsed_count = Column(Integer, default=0)
-    is_processed = Column(Boolean, default=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    max_group_id = Column(BigInteger, nullable=False)
+    custom_message_id = Column(UUID(as_uuid=True), ForeignKey("messages.id", ondelete="SET NULL"), nullable=True)
+    is_active = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", back_populates="groups")
+    custom_message = relationship("Message", foreign_keys=[custom_message_id], post_update=True)
+    schedules = relationship("Schedule", back_populates="group", cascade="all, delete-orphan")
+    logs = relationship("Log", back_populates="group", cascade="all, delete-orphan")
 
 
-class Product(Base):
-    __tablename__ = "products"
-
+class Message(Base):
+    __tablename__ = "messages"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    category_id = Column(String, ForeignKey("categories.id"))
-    brand = Column(String)
-    model = Column(String)
-    price = Column(Numeric(12, 2))
-    source_channel = Column(String)
-    message_link = Column(String)
-    raw_post_id = Column(UUID(as_uuid=True), ForeignKey("raw_posts.id"))
-    attributes = Column(JSONB, default=dict)
-    timestamp = Column(DateTime(timezone=True), default=datetime.utcnow)
+    text_content = Column(Text, nullable=True)
+    media_type = Column(String(50), nullable=True)
+    media_path = Column(String(500), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
-    storage = Column(String)
-    ram = Column(String)
-    color = Column(String)
-    sim_type = Column(String)
-    screen_size = Column(String)
-    chip = Column(String)
-    connectivity = Column(String)
-    country_flag = Column(String)
-    sku = Column(String)
-
-    # Relationships (optional, for convenience)
-    raw_post = relationship("RawPost")
-    category = relationship("Category")
+    project_default = relationship("Project", back_populates="default_message", foreign_keys=[Project.default_message_id])
+    group_custom = relationship("Group", back_populates="custom_message", foreign_keys=[Group.custom_message_id])
 
 
-class PriceHistory(Base):
-    __tablename__ = "price_history"
-
+class Schedule(Base):
+    __tablename__ = "schedules"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"))
-    price = Column(Numeric(12, 2))
-    timestamp = Column(DateTime(timezone=True), default=datetime.utcnow)
-    source_channel = Column(String)
+    group_id = Column(UUID(as_uuid=True), ForeignKey("groups.id", ondelete="CASCADE"), nullable=False)
+    schedule_type = Column(String(20), nullable=False)
+    schedule_value = Column(JSON, nullable=False)
+    last_sent_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    group = relationship("Group", back_populates="schedules")
 
 
-class ApiKey(Base):
-    __tablename__ = "api_keys"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    key = Column(String, unique=True, nullable=False)
-    description = Column(String)
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
-
-
-# --- New tables for LithTGBot ---
-
-class TrackedProduct(Base):
-    __tablename__ = "tracked_products"
-
+class Log(Base):
+    __tablename__ = "logs"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(BigInteger, nullable=False)
-    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
-    last_seen_price = Column(Numeric(12, 2))
-    last_notified_price = Column(Numeric(12, 2))
-    is_active = Column(Boolean, nullable=False, default=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    group_id = Column(UUID(as_uuid=True), ForeignKey("groups.id", ondelete="SET NULL"), nullable=True)
+    user_id = Column(BigInteger, ForeignKey("users.telegram_id", ondelete="SET NULL"), nullable=True)
+    status = Column(String(20), nullable=False)
+    message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
-    __table_args__ = (
-        UniqueConstraint("user_id", "product_id", name="uq_tracked_user_product"),
-        Index("idx_tracked_products_user_id", "user_id"),
-        Index("idx_tracked_products_product_id", "product_id"),
-        Index("idx_tracked_products_active", "is_active"),
-    )
-
-
-class UserSearchHistory(Base):
-    __tablename__ = "user_search_history"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(BigInteger, nullable=False)
-    query = Column(String(500), nullable=False)
-    normalized_query = Column(String(500))
-    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id", ondelete="SET NULL"))
-    final_price = Column(Numeric(12, 2))
-    results_count = Column(Integer, nullable=False, default=0)
-    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-
-    __table_args__ = (
-        Index("idx_user_search_history_user_created", "user_id", "created_at", postgresql_ops={"created_at": "DESC"}),
-        Index("idx_user_search_history_query_created", "query", "created_at", postgresql_ops={"created_at": "DESC"}),
-        Index("idx_user_search_history_product_id", "product_id"),
-        Index("idx_user_search_history_query_count", "query", "results_count", postgresql_ops={"results_count": "DESC"}),
-    )
+    project = relationship("Project", back_populates="logs")
+    group = relationship("Group", back_populates="logs")
+    user = relationship("User", back_populates="logs")

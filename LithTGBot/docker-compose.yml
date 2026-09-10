@@ -1,36 +1,72 @@
-version: '3.8'
-
 services:
+  db:
+    image: postgres:15-alpine
+    container_name: lithtgbot_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-wol_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change_me_in_env}
+      POSTGRES_DB: ${DB_NAME:-window_of_light}
+    ports:
+      - "127.0.0.1:5434:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-wol_user} -d ${DB_NAME:-window_of_light}"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  vpn:
+    image: qmcgaw/gluetun
+    container_name: lithtgbot_vpn
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - ./sessions:/gluetun/sessions
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ping", "-c", "1", "1.1.1.1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   bot:
     build: .
-    container_name: lithtgbot
-    restart: unless-stopped
-    command: python3 main.py
+    container_name: lithtgbot_bot
+    restart: always
+    network_mode: "service:vpn"
+    command: ["python3", "main.py"]
     env_file:
       - .env
     volumes:
-      - .:/app
+      - ./media:/app/media
     depends_on:
-      - celery_worker
+      db:
+        condition: service_healthy
+      vpn:
+        condition: service_started
 
-  celery_worker:
+  worker:
     build: .
     container_name: lithtgbot_worker
-    restart: unless-stopped
-    command: celery -A tasks.celery worker -l info
+    restart: always
+    network_mode: "service:vpn"
+    command: ["python3", "-c", "import asyncio; from services.max_worker import start_worker; asyncio.run(start_worker())"]
     env_file:
       - .env
     volumes:
-      - .:/app
-
-  celery_beat:
-    build: .
-    container_name: lithtgbot_beat
-    restart: unless-stopped
-    command: celery -A tasks.celery beat -l info
-    env_file:
-      - .env
-    volumes:
-      - .:/app
+      - ./media:/app/media
+      - ./sessions:/app/sessions
     depends_on:
-      - celery_worker
+      db:
+        condition: service_healthy
+      vpn:
+        condition: service_started
+
+volumes:
+  pgdata:

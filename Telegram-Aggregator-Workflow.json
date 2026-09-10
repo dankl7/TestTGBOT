@@ -1,0 +1,84 @@
+{
+  "$schema": "http://json.schemastore.org/n8n-workflow-v1.0.json",
+  "name": "Telegram Auto Reposter V3",
+  "description": "Слушает источники, фильтрует дубли, переписывает и постит в свою группу",
+  "meta": { "instanceId": "local" },
+  "tags": ["telegram", "repost", "ai", "aggregator"],
+  "settings": { "executionOrder": "v1", "saveExecutionProgress": true, "timezone": "auto" },
+  "nodes": [
+    {
+      "parameters": { "updates": ["*"], "additionalFields": {} },
+      "name": "Telegram Source",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0],
+      "webhookId": "8b97fd4e-57b5-4bd4-b3c3-30a94bef17ca",
+      "id": "trigger-node",
+      "credentials": { "telegramApi": { "id": "", "name": "Telegram Bot API" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "const msg = $input.first().json.message;\nif (!msg || !msg.text) return [];\nconst text = msg.text;\n// Простой хеш-код текста\nconst hash = text.split('').reduce((a,b)=>{a=((a<<5)-a)+b.charCodeAt(0);return a&a},0).toString(16);\nreturn [{ json: { text, hash, chatId: msg.chat.id, messageId: msg.message_id } }];",
+        "mode": "runOnceForEachItem"
+      },
+      "name": "Extract Post Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [200, 0],
+      "id": "code-extract"
+    },
+    {
+      "parameters": {
+        "functionCode": "const seen = new Set(JSON.parse(global.$getWorkflowStaticData().seenHashes || '[]'));\nconst newItems = [];\nfor (const item of items) {\n  if (!seen.has(item.json.hash)) {\n    seen.add(item.json.hash);\n    newItems.push(item);\n  }\n}\nglobal.$getWorkflowStaticData().seenHashes = JSON.stringify(Array.from(seen).slice(-500));\nreturn newItems;"
+      },
+      "name": "Check If New",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [400, 0],
+      "id": "function-dedup"
+    },
+    {
+      "parameters": {
+        "jsCode": "let text = item.json.text;\n// Убираем все URL\ntext = text.replace(/https?:\\/\\/[^\\s]+/gi, '');\n// Убираем @упоминания\ntext = text.replace(/@[a-zA-Z0-9_]+/gi, '');\n// Убираем t.me\ntext = text.replace(/t\\.me\\/\\w+/gi, '');\n// Убираем лишние пробелы\ntext = text.replace(/\\s{2,}/g, ' ');\nreturn [{ json: { text: text.trim(), ...item.json } }];",
+        "mode": "runOnceForEachItem"
+      },
+      "name": "Clean & Strip",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [600, 0],
+      "id": "code-clean"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fallback для ситуации без AI API\nconst text = item.json.text;\nreturn [{ json: { text: text, ...item.json } }];",
+        "mode": "runOnceForEachItem"
+      },
+      "name": "Adapt Format (Manual)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [800, 0],
+      "id": "code-adapt"
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TARGET_GROUP_ID",
+        "text": "={{ $json.text }}",
+        "additionalFields": {}
+      },
+      "name": "Send To My Group",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1000, 0],
+      "id": "send-telegram",
+      "credentials": { "telegramApi": { "id": "", "name": "Telegram Bot API" } }
+    }
+  ],
+  "connections": {
+    "Telegram Source": { "main": [[{ "node": "Extract Post Data", "type": "main", "index": 0 }]] },
+    "Extract Post Data": { "main": [[{ "node": "Check If New", "type": "main", "index": 0 }]] },
+    "Check If New": { "main": [[{ "node": "Clean & Strip", "type": "main", "index": 0 }]] },
+    "Clean & Strip": { "main": [[{ "node": "Adapt Format (Manual)", "type": "main", "index": 0 }]] },
+    "Adapt Format (Manual)": { "main": [[{ "node": "Send To My Group", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {}
+}

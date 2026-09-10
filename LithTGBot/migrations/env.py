@@ -34,7 +34,9 @@ def run_migrations_offline() -> None:
 
 def include_name(name, type_, parent_names):
     if type_ == "table":
-        return name in {"tracked_products", "user_search_history"}
+        return name in {
+            "users", "projects", "messages", "groups", "schedules", "logs",
+        }
     return True
 
 def do_run_migrations(connection: Connection) -> None:

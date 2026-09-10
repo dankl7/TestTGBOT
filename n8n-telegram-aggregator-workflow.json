@@ -1,0 +1,302 @@
+{
+  "name": "Telegram Post Aggregator",
+  "nodes": [
+    {
+      "id": "telegram-trigger",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "parameters": {
+        "updates": ["message"],
+        "chatId": "={{$vars.SOURCE_CHAT_ID}}"
+      },
+      "credentials": {
+        "telegramApi": "={{$vars.TELEGRAM_CREDENTIALS}}"
+      }
+    },
+    {
+      "id": "check-duplicate",
+      "name": "Check Duplicate",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [450, 300],
+      "parameters": {
+        "mode": "manual",
+        "values": {
+          "number": [],
+          "string": [
+            {
+              "name": "postHash",
+              "value": "={{ $json.message.text ? $hash_sha256($json.message.text) : $hash_md5($toString($json.message.photo)) }}"
+            },
+            {
+              "name": "postText",
+              "value": "={{ $json.message.text }}"
+            },
+            {
+              "name": "sourceMessageId",
+              "value": "={{ $json.message.message_id }}"
+            },
+            {
+              "name": "sourceChatId",
+              "value": "={{ $json.message.chat.id }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "redis-dedupe",
+      "name": "Redis Deduplication",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [650, 300],
+      "parameters": {
+        "operation": "exists",
+        "key": "=post:{{ $vars.postHash }}"
+      },
+      "credentials": {
+        "redis": "={{$vars.REDIS_CREDENTIALS}}"
+      }
+    },
+    {
+      "id": "if-duplicate",
+      "name": "Check if Duplicate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [850, 300],
+      "parameters": {
+        "conditions": {
+          "options": {},
+          "conditions": [
+            {
+              "id": "exists",
+              "parameter1": "{{ $json.exists }}",
+              "parameter2": "",
+              "logicOperation": "isEmpty"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "openai-process",
+      "name": "AI Content Processor",
+      "type": "openai-api.chat",
+      "typeVersion": 1,
+      "position": [1050, 250],
+      "parameters": {
+        "operation": "complete",
+        "model": "gpt-4o-mini",
+        "messages": [
+          {
+            "role": "system",
+            "content": "Ты опытный редактор контента. Твоя задача:\n1. Перепиши текст под формат нашей группы\n2. Удали ВСЕ ссылки (URL, @mention групп/каналов)\n3. Удали любые упоминания источника откуда пост\n4. Сохрани суть и смысл поста\n5. Если есть изображения - опиши их кратко для alt текста\n6. Текст должен выглядеть органично, как будто написан для нашей группы\n\nФормат вывода: ТОЛЬКО переработанный текст, БЕЗ пояснений."
+          },
+          {
+            "role": "user",
+            "content": "={{ $vars.postText }}"
+          }
+        ],
+        "temperature": 0.7
+      },
+      "credentials": {
+        "openAiApi": "={{$vars.OPENAI_CREDENTIALS}}"
+      }
+    },
+    {
+      "id": "save-dedup",
+      "name": "Save to Deduplication Store",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [1050, 450],
+      "parameters": {
+        "operation": "set",
+        "key": "=post:{{ $vars.postHash }}",
+        "value": "={{ $now }}",
+        " TTL": 604800
+      },
+      "credentials": {
+        "redis": "={{$vars.REDIS_CREDENTIALS}}"
+      }
+    },
+    {
+      "id": "send-telegram",
+      "name": "Send to My Group",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1250, 250],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{$vars.MY_GROUP_ID}}",
+        "text": "={{ $json.choices[0].message.content }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "credentials": {
+        "telegramApi": "={{$vars.TELEGRAM_CREDENTIALS}}"
+      }
+    },
+    {
+      "id": "log-skipped",
+      "name": "Log Skipped Post",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 450],
+      "parameters": {
+        "jsCode": "// Пост уже обработан, пропускаем\nconst msg = $input.first().json;\nconsole.log(`[SKIPPED] Duplicate post from chat ${msg.sourceChatId}, message ${msg.sourceMessageId}`);\nreturn [{ json: { skipped: true, reason: 'duplicate', sourceChatId: msg.sourceChatId } }];"
+      }
+    },
+    {
+      "id": "cleanup-old",
+      "name": "Cleanup Old Hashes",
+      "type": "n8n-nodes-base.schedule",
+      "typeVersion": 1,
+      "position": [100, 600],
+      "parameters": {
+        "rule": "interval",
+        "interval": [
+          {
+            "field": "hours",
+            "field2": 24
+          }
+        ]
+      }
+    },
+    {
+      "id": "redis-cleanup",
+      "name": "Remove Expired Hashes",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [300, 600],
+      "parameters": {
+        "operation": "delete",
+        "key": "=post:*"
+      },
+      "credentials": {
+        "redis": "={{$vars.REDIS_CREDENTIALS}}"
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Check Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Duplicate": {
+      "main": [
+        [
+          {
+            "node": "Redis Deduplication",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis Deduplication": {
+      "main": [
+        [
+          {
+            "node": "Check if Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check if Duplicate": {
+      "main": [
+        [
+          {
+            "node": "AI Content Processor",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Save to Deduplication Store",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Skipped Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Content Processor": {
+      "main": [
+        [
+          {
+            "node": "Send to My Group",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Save to Deduplication Store",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to Deduplication Store": {
+      "main": [
+        []
+      ]
+    },
+    "Send to My Group": {
+      "main": [
+        []
+      ]
+    },
+    "Log Skipped Post": {
+      "main": [
+        []
+      ]
+    },
+    "Cleanup Old Hashes": {
+      "main": [
+        [
+          {
+            "node": "Remove Expired Hashes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remove Expired Hashes": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "variables": {
+    "SOURCE_CHAT_ID": "-1001234567890",
+    "MY_GROUP_ID": "-1009876543210",
+    "TELEGRAM_CREDENTIALS": "telegram-bot",
+    "REDIS_CREDENTIALS": "redis",
+    "OPENAI_CREDENTIALS": "openai"
+  },
+  "staticData": null,
+  "tags": ["telegram", "automation", "reposting"]
+}

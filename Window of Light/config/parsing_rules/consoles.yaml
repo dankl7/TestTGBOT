@@ -1,0 +1,62 @@
+category:
+  id: "consoles"
+  name: "Gaming Consoles"
+  parent_id: null
+  keywords:
+    - "ps5"
+    - "playstation"
+    - "playstation 5"
+    - "xbox"
+    - "nintendo"
+    - "switch"
+    - "dualsense"
+    - "controller"
+    - "vr"
+    - "virtual reality"
+  
+  # Флаги
+  flags_esim_only: ["🇧🇭", "🇨🇦", "🇬🇺", "🇯🇵", "🇰🇼", "🇲🇽", "🇴🇲", "🇶🇦", "🇸🇦", "🇦🇪", "🇺🇸", "🇻🇮"]
+  flags_esim_physical: ["🇪🇺", "🇮🇳", "🇻🇳", "🇦🇺", "🇳🇿", "🇰🇷", "🇸🇬", "🇭🇰"]
+  flags_physical_only: ["🇨🇳"]
+  
+  attributes:
+    - name: "storage"
+      patterns:
+        - "(\\d+)(GB|TB)"
+        - "(\\d+)\\s*гб"
+      type: "string"
+    
+    - name: "color"
+      patterns:
+        - "\\b(black|white|blue|red|green|gold|silver|pink|purple|gray|camo)\\b"
+      type: "string"
+    
+    - name: "version"
+      patterns:
+        - "Pro"
+        - "Slim"
+        - "Digital"
+        - "Disk"
+        - "VR"
+        - "VR2"
+      type: "string"
+    
+    - name: "region"
+      patterns:
+        - "🇧🇭|🇨🇦|🇬🇺|🇯🇵|🇰🇼|🇲🇽|🇴🇲|🇶🇦|🇸🇦|🇦🇪|🇺🇸|🇻🇮|🇪🇺|🇮🇳|🇻🇳|🇦🇺|🇳🇿|🇰🇷|🇸🇬|🇭🇰|🇨🇳|🇷🇺|🇰🇿|🇮🇩|🇹🇭"
+      type: "string"
+
+  brand_patterns:
+    sony:
+      - "ps5"
+      - "playstation"
+      - "dualsense"
+    microsoft:
+      - "xbox"
+    nintendo:
+      - "nintendo"
+      - "switch"
+  
+  price_patterns:
+    - "(\\d{1,3}(?:\\s*\\d{3})*|\\d+)\\s*(₽|руб|RUB|\\$|€)"
+    - "(\\d+)\\s*(тыс\\.?|k)\\s*(₽|руб)"

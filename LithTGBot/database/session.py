@@ -15,7 +15,7 @@ async_session_maker = async_sessionmaker(
     autoflush=False,
 )
 
-async def get_db_session():
-    """Yields an async database session."""
-    async with async_session_maker() as session:
-        yield session
+async def init_models():
+    from database.models import Base
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
